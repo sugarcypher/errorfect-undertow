@@ -1,0 +1,18 @@
+{
+  "name": "errorfect-undertow",
+  "version": "1.0.0",
+  "description": "Errorfect Undertow — detects the linguistic mechanisms by which a text or body of work covertly applies a vector of belief, action, or thought.",
+  "private": true,
+  "license": "UNLICENSED",
+  "author": "Briar Greenway & ThinkWell Labs",
+  "main": "engine.js",
+  "bin": { "undertow": "cli.js" },
+  "scripts": {
+    "test": "node test/run.js && node test/deep-mock.js",
+    "scan": "node cli.js"
+  },
+  "engines": { "node": ">=18" },
+  "optionalDependencies": {
+    "@anthropic-ai/sdk": "1.0.0"
+  }
+}
