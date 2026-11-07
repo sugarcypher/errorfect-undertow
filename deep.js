@@ -141,6 +141,12 @@
       ? 'This is a body of work (' + docs.length + ' documents). Analyze it as a whole: which hidden vectors recur, how they build across documents, and whether shared phrasing suggests coordinated talking points. Cite which document each quote comes from in the mechanism or how_it_works field.'
       : 'Analyze this text.';
     var content = '<specimen>\n' + specimen + '\n</specimen>\n\n<prescan>\n' + prescanSummary(scan) + '\n</prescan>\n\n' + task;
+    return requestFor(content);
+  }
+
+  // The fixed request around a user message. The hosted proxy calls this too, so it only ever
+  // sends Undertow's own prompt, model and schema, whatever a client puts in the body.
+  function requestFor(content) {
     return {
       model: MODEL,
       max_tokens: MAX_TOKENS,
@@ -228,7 +234,9 @@
 
   return {
     MODEL: MODEL,
+    MAX_TOKENS: MAX_TOKENS,
     LARGE_INPUT_TOKENS: LARGE_INPUT_TOKENS,
+    requestFor: requestFor,
     SYSTEM: SYSTEM,
     SCHEMA: SCHEMA,
     estimateTokens: estimateTokens,

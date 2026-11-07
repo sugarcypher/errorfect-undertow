@@ -28,9 +28,33 @@ node cli.js ./posts --out report.md    # write to a file
 ANTHROPIC_API_KEY=sk-ant-... node cli.js ./posts --deep
 ```
 
-The CLI also accepts an `ant auth login` profile. In the browser, open **Deep read → API key**. The key goes only from your browser to api.anthropic.com.
+The CLI also accepts an `ant auth login` profile.
 
-**Tests:** `npm test`. This runs the engine tests, then the deep-read wiring test against a local mock API. The mock test calls nothing external and costs nothing.
+In the browser, the deep read works without a key: it runs through the hosted proxy (`worker/`), within a daily allowance. To use your own key instead, open **Deep read → Use your own API key**. That key goes only from your browser to api.anthropic.com.
+
+**Tests:** `npm test`. This runs the engine tests, the deep-read wiring test against a local mock API, and the proxy's rule tests. None of them call anything external or cost anything. `node test/hosted-smoke.mjs` checks the deployed proxy; adding `--live` spends one hosted deep read.
+
+## Hosted proxy
+
+`worker/` is a Cloudflare Worker that holds the Anthropic API key so visitors can run a deep read without one. It is not a general Claude proxy. It accepts only a single text user message, and it rebuilds the model, system prompt, output schema, thinking and token limit from `deep.js`. A client can't change any of these or add tools.
+
+Limits are set in `worker/wrangler.toml`:
+
+| Limit | Default |
+|---|---|
+| Allowed page origins | sugarcypher.github.io, localhost:8000 |
+| Burst | 2 requests a minute per IP |
+| Per visitor | 5 deep reads a day per IP |
+| Global | 25 deep reads a day |
+| Body size | 400,000 characters |
+
+The daily counts are approximate because KV storage is eventually consistent. Set a monthly spend limit in the Anthropic Console as the hard backstop.
+
+```bash
+cd worker
+wrangler secret put ANTHROPIC_API_KEY   # paste the key at the prompt
+wrangler deploy                          # after changing limits or deep.js
+```
 
 ## How a scan works
 
@@ -153,5 +177,6 @@ Undertow honors the same limits as the white paper (§7) and the ψ framework:
 | `deep.js` | Claude deep-read request, schema, parsing, Markdown |
 | `index.html` | Browser tool |
 | `cli.js` | Command line |
+| `worker/` | Hosted deep-read proxy (Cloudflare Worker) |
 | `samples/` | Calibration specimens (fictional) |
-| `test/run.js`, `test/deep-mock.js` | Tests |
+| `test/` | Engine, deep-read mock and proxy tests; `hosted-smoke.mjs` for the live proxy |

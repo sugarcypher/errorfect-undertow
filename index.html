@@ -255,10 +255,10 @@
       </div>
       <div class="hint" id="costNote"></div>
       <details class="deep-settings" id="deepSettings">
-        <summary>API key</summary>
+        <summary>Use your own API key (optional)</summary>
         <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" />
         <label class="check" style="margin-top:8px"><input type="checkbox" id="rememberKey" /> Remember on this device</label>
-        <p class="hint" style="margin-top:6px">The key goes only from this browser to api.anthropic.com. Remembering stores it in this browser's local storage.</p>
+        <p class="hint" style="margin-top:6px">Without a key, the deep read runs through the Errorfect server, which allows a few per day. With a key, it goes only from this browser to api.anthropic.com, with no daily limit. Remembering stores the key in this browser's local storage.</p>
       </details>
       <div class="status" id="status" role="status" aria-live="polite"></div>
     </div>
@@ -299,6 +299,8 @@
     'https://esm.sh/@anthropic-ai/sdk@1.0.0'
   ];
   var KEY_STORE = 'errorfect-undertow.apiKey';
+  // Hosted deep-read proxy (worker/index.mjs). It holds the API key and rebuilds every request from deep.js.
+  var HOSTED_API = 'https://errorfect-undertow-api.13531nxt.workers.dev';
 
   var state = { files: [], docs: [], scan: null, deep: null, viewDoc: 0 };
   var $ = function (id) { return document.getElementById(id); };
@@ -428,7 +430,7 @@
     if (has) {
       var tin = D.estimateTokens(state.docs);
       var cost = tin * 4 / 1e6 + 8000 * 20 / 1e6; // Opus 5.5: $4 / $20 per million tokens; ~8k output assumed
-      $('costNote').textContent = 'About ' + tin.toLocaleString() + ' input tokens · roughly $' + cost.toFixed(2) + ' per deep read.';
+      $('costNote').textContent = 'About ' + tin.toLocaleString() + ' input tokens. Runs on the hosted allowance, or about $' + cost.toFixed(2) + ' per read with your own key.';
     } else $('costNote').textContent = '';
   }
 
@@ -736,8 +738,8 @@
   async function runDeep() {
     if (!state.scan) return;
     var key = $('apiKey').value.trim();
-    if (!key) { $('deepSettings').open = true; $('apiKey').focus(); setStatus('Add an Anthropic API key to run the deep read.', true); return; }
-    try { if ($('rememberKey').checked) localStorage.setItem(KEY_STORE, key); else localStorage.removeItem(KEY_STORE); } catch (e) { /* storage unavailable */ }
+    var hosted = !key;
+    try { if (key && $('rememberKey').checked) localStorage.setItem(KEY_STORE, key); else localStorage.removeItem(KEY_STORE); } catch (e) { /* storage unavailable */ }
     var tin = D.estimateTokens(state.docs);
     if (tin > D.LARGE_INPUT_TOKENS && !confirm('This body of work is about ' + tin.toLocaleString() + ' input tokens. Send it to ' + D.MODEL + '?')) return;
     var btn = $('deepBtn');
@@ -745,16 +747,24 @@
     setStatus('Loading SDK…');
     try {
       var Anthropic = await loadSDK();
-      var client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+      // Hosted: the proxy ignores the placeholder key and supplies its own. No retries, so a refused
+      // request doesn't spend more of the daily allowance.
+      var client = hosted
+        ? new Anthropic({ apiKey: 'undertow-hosted', baseURL: HOSTED_API, dangerouslyAllowBrowser: true, maxRetries: 0 })
+        : new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
       var res = await D.runDeepRead(client, state.docs, state.scan, { onStatus: function (s) { setStatus(s); } });
       state.deep = res;
       renderDeep(res);
-      setStatus('Deep read complete · ' + res.usage.input_tokens.toLocaleString() + ' in / ' + res.usage.output_tokens.toLocaleString() + ' out tokens.');
+      setStatus('Deep read complete · ' + res.usage.input_tokens.toLocaleString() + ' in / ' + res.usage.output_tokens.toLocaleString() + ' out tokens' + (hosted ? ' · hosted' : '') + '.');
       var d = $('deepOut'); if (d) d.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (err) {
       var msg = err && err.message ? err.message : String(err);
-      if (err && err.status === 401) msg = 'The API key was rejected (401).';
+      var serverMsg = err && err.error && err.error.error && err.error.error.message;
+      if (hosted && serverMsg) msg = serverMsg;
+      else if (hosted && err && err.status == null) msg = 'Could not reach the hosted deep read. Check your connection, or add your own API key.';
+      else if (err && err.status === 401) msg = 'The API key was rejected (401).';
       else if (err && err.status === 429) msg = 'Rate limited (429). Wait a moment and try again.';
+      if (hosted && err && (err.status === 429 || err.status === 413 || err.status === 503)) $('deepSettings').open = true;
       setStatus('Deep read failed: ' + msg + ' The rule-based scan is unaffected.', true);
     } finally {
       btn.disabled = false;

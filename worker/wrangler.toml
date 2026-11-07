@@ -1,0 +1,21 @@
+# Errorfect Undertow — hosted deep-read proxy
+# Deploy:  cd worker && wrangler deploy
+# Key:     cd worker && wrangler secret put ANTHROPIC_API_KEY
+name = "errorfect-undertow-api"
+main = "index.mjs"
+compatibility_date = "2026-10-01"
+
+[vars]
+ALLOWED_ORIGINS = "https://sugarcypher.github.io,http://localhost:8000,http://127.0.0.1:8000"
+DAILY_LIMIT = "25"      # hosted deep reads per day, all visitors combined
+PER_IP_DAILY = "5"      # hosted deep reads per visitor IP per day
+MAX_BODY_CHARS = "400000"
+
+[[ratelimits]]
+name = "PER_IP"
+namespace_id = "7301"
+simple = { limit = 2, period = 60 }
+
+[[kv_namespaces]]
+binding = "USAGE"
+id = "2a40ae3fa7e14829952480451ff0104a"

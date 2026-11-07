@@ -8,7 +8,7 @@
   "main": "engine.js",
   "bin": { "undertow": "cli.js" },
   "scripts": {
-    "test": "node test/run.js && node test/deep-mock.js",
+    "test": "node test/run.js && node test/deep-mock.js && node test/worker.mjs",
     "scan": "node cli.js"
   },
   "engines": { "node": ">=18" },
