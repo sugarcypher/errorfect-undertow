@@ -1,20 +1,32 @@
-# Errorfect Undertow — hosted deep-read proxy
-# Deploy:  cd worker && wrangler deploy
-# Key:     cd worker && wrangler secret put ANTHROPIC_API_KEY
+# Errorfect Undertow — access + hosted deep-read proxy
+# Deploy:   cd worker && wrangler deploy
+# Secrets:  wrangler secret put NAME --name errorfect-undertow-api   (see index.mjs header)
 name = "errorfect-undertow-api"
 main = "index.mjs"
 compatibility_date = "2026-10-01"
 
 [vars]
 ALLOWED_ORIGINS = "https://sugarcypher.github.io,http://localhost:8000,http://127.0.0.1:8000"
-DAILY_LIMIT = "25"      # hosted deep reads per day, all visitors combined
-PER_IP_DAILY = "5"      # hosted deep reads per visitor IP per day
+PRICE_LABEL = "$39"
+PAID_DAILY = "10"       # hosted deep reads per day for each paid access
+PASS_DAILY = "25"       # hosted deep reads per day on the password
+DAILY_LIMIT = "60"      # hosted deep reads per day, everyone combined
 MAX_BODY_CHARS = "400000"
 
 [[ratelimits]]
-name = "PER_IP"
+name = "PER_IP"         # deep-read bursts
 namespace_id = "7301"
 simple = { limit = 2, period = 60 }
+
+[[ratelimits]]
+name = "PASS_IP"        # password attempts
+namespace_id = "7302"
+simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "ACCESS_IP"      # payment confirmation polling
+namespace_id = "7303"
+simple = { limit = 40, period = 60 }
 
 [[kv_namespaces]]
 binding = "USAGE"

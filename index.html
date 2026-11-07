@@ -210,6 +210,29 @@
   footer.foot { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--muted); font-size: 0.82rem; }
   footer.foot p + p { margin-top: 8px; }
   .hide { display: none !important; }
+
+  /* ---------- Access ---------- */
+  .gate { padding: 32px 0 56px; }
+  .gate .panel { max-width: 760px; margin: 0 auto; padding: 28px; }
+  .gate h2 { font-size: 1.05rem; }
+  .gate p { color: var(--ink-soft); font-size: 0.95rem; margin-top: 10px; }
+  .gate ul { list-style: none; display: grid; gap: 8px; margin-top: 16px; }
+  .gate li { background: rgba(0, 0, 0, 0.35); border-radius: 6px; padding: 9px 12px; font-size: 0.9rem; color: var(--ink-soft); }
+  .gate li b { color: var(--cyan); font-weight: normal; }
+  .gate .price { margin-top: 22px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .gate .price .amt { font-size: 2rem; font-weight: bold; color: var(--cyan); }
+  .gate .price .terms { color: var(--muted); font-size: 0.88rem; }
+  .gate .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .gate .actions .btn { padding: 11px 20px; font-size: 0.95rem; text-decoration: none; display: inline-block; }
+  .gate .fine { color: var(--muted); font-size: 0.8rem; margin-top: 16px; }
+  .gate .note { color: var(--muted); font-size: 0.85rem; margin-top: 14px; border-left: 2px solid var(--line); padding-left: 10px; }
+  dialog.pass { margin: auto; background: #10182e; color: var(--ink); border: 1px solid rgba(0, 245, 255, 0.35); border-radius: 10px; padding: 22px; width: min(420px, calc(100% - 32px)); }
+  dialog.pass::backdrop { background: rgba(0, 0, 0, 0.7); }
+  dialog.pass h2 { font-size: 1rem; color: var(--pink); letter-spacing: 0.12em; text-transform: uppercase; }
+  dialog.pass label { display: block; color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
+  dialog.pass .row { justify-content: flex-end; margin-top: 16px; }
+  .linkbtn { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font-size: inherit; padding: 0; }
+  .linkbtn:hover { color: var(--cyan); }
 </style>
 </head>
 <body>
@@ -228,7 +251,42 @@
   </div>
 </header>
 
-<div class="wrap layout">
+<section class="wrap gate hide" id="gate" aria-labelledby="gateTitle">
+  <div class="panel">
+    <h2 id="gateTitle">What Undertow does</h2>
+    <p>Undertow reads a text, or a whole body of work, and marks the language that moves a reader toward a belief, an action, or a way of thinking. For each mechanism it shows the sentence it sits in, how it works, and a question you can put to it.</p>
+    <ul>
+      <li><b>Scans</b> of any length, run in your browser. Your text stays on your device.</li>
+      <li><b>Bodies of work:</b> many documents at once, with the mechanisms they share, repeated phrasing and recurring targets.</li>
+      <li><b>Hidden layer:</b> invisible characters, look-alike letters and embedded instructions to machines.</li>
+      <li><b>Deep reads with Claude:</b> a written analysis of each hidden vector and what the claim rests on, up to <span id="gateDaily">10</span> a day.</li>
+      <li><b>Reports</b> in Markdown and JSON.</li>
+    </ul>
+    <p class="note">Undertow reports patterns in language, not intent. A flagged sentence is a place to look more closely, not a verdict on the writer.</p>
+    <div class="price"><span class="amt" id="gatePrice">$39</span><span class="terms">one-time payment · no subscription</span></div>
+    <div class="actions">
+      <a class="btn primary" id="buyBtn" href="#" aria-disabled="true">Get access</a>
+      <button class="btn" type="button" id="passBtn">Enter password</button>
+    </div>
+    <div class="status" id="gateStatus" role="status" aria-live="polite"></div>
+    <p class="fine">Checkout is handled by Stripe. After paying you return to this page, and access is saved in this browser.</p>
+  </div>
+</section>
+
+<dialog class="pass" id="passDialog" aria-labelledby="passTitle">
+  <form method="dialog" id="passForm">
+    <h2 id="passTitle">Enter password</h2>
+    <label for="passInput">Password</label>
+    <input type="password" id="passInput" autocomplete="current-password" required />
+    <div class="status" id="passStatus" role="status" aria-live="polite"></div>
+    <div class="row">
+      <button class="btn" type="button" id="passCancel">Cancel</button>
+      <button class="btn primary" type="submit" id="passSubmit">Unlock</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="wrap layout hide" id="app">
   <aside class="controls">
     <div class="panel">
       <h2>Specimen</h2>
@@ -258,7 +316,7 @@
         <summary>Use your own API key (optional)</summary>
         <input type="password" id="apiKey" placeholder="sk-ant-…" autocomplete="off" />
         <label class="check" style="margin-top:8px"><input type="checkbox" id="rememberKey" /> Remember on this device</label>
-        <p class="hint" style="margin-top:6px">Without a key, the deep read runs through the Errorfect server, which allows a few per day. With a key, it goes only from this browser to api.anthropic.com, with no daily limit. Remembering stores the key in this browser's local storage.</p>
+        <p class="hint" style="margin-top:6px">Without a key, the deep read runs through the Errorfect server and is included with your access, up to a daily limit. With a key, it goes only from this browser to api.anthropic.com, with no daily limit. Remembering stores the key in this browser's local storage.</p>
       </details>
       <div class="status" id="status" role="status" aria-live="polite"></div>
     </div>
@@ -285,6 +343,7 @@
   <div class="wrap">
     <p id="epistemic"></p>
     <p>Lexical layer: Errorfect operator taxonomy (White Paper §8.2). Convergence rule: ψ Influence Mapping interpretation key. Deep-read structure: the My-Psi-Self triad (MODL Paper 3). Errorfect Undertow by Briar Greenway &amp; ThinkWell Labs · <a href="https://errorfect.com">errorfect.com</a></p>
+    <p id="accessLine" class="hide"><span id="accessKind"></span> · <button type="button" class="linkbtn" id="signOut">Remove access from this browser</button></p>
   </div>
 </footer>
 
@@ -750,7 +809,7 @@
       // Hosted: the proxy ignores the placeholder key and supplies its own. No retries, so a refused
       // request doesn't spend more of the daily allowance.
       var client = hosted
-        ? new Anthropic({ apiKey: 'undertow-hosted', baseURL: HOSTED_API, dangerouslyAllowBrowser: true, maxRetries: 0 })
+        ? new Anthropic({ apiKey: 'undertow-hosted', baseURL: HOSTED_API, dangerouslyAllowBrowser: true, maxRetries: 0, defaultHeaders: { 'x-undertow-token': access.token || '' } })
         : new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
       var res = await D.runDeepRead(client, state.docs, state.scan, { onStatus: function (s) { setStatus(s); } });
       state.deep = res;
@@ -765,6 +824,7 @@
       else if (err && err.status === 401) msg = 'The API key was rejected (401).';
       else if (err && err.status === 429) msg = 'Rate limited (429). Wait a moment and try again.';
       if (hosted && err && (err.status === 429 || err.status === 413 || err.status === 503)) $('deepSettings').open = true;
+      if (hosted && err && err.status === 401) { revoke(msg); return; }
       setStatus('Deep read failed: ' + msg + ' The rule-based scan is unaffected.', true);
     } finally {
       btn.disabled = false;
@@ -854,7 +914,150 @@
     });
   }
 
+  // ---------- Access ----------
+  // A $39 purchase or the password earns a signed token from the Worker (worker/index.mjs),
+  // kept in this browser. The Worker checks it on every hosted deep read.
+  var TOKEN_STORE = 'errorfect-undertow.access';
+  var PENDING_STORE = 'errorfect-undertow.pendingSession';
+  var access = { token: null, kind: null, paymentUrl: null };
+  var appStarted = false;
+
+  function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function tokenPayload(t) {
+    try { var b = t.split('.')[0].replace(/-/g, '+').replace(/_/g, '/'); return JSON.parse(atob(b)); } catch (e) { return null; }
+  }
+  async function api(path, opts) {
+    opts = opts || {};
+    var r = await fetch(HOSTED_API + path, {
+      method: opts.body ? 'POST' : 'GET',
+      headers: Object.assign({ 'content-type': 'application/json' }, opts.headers || {}),
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    var data = null;
+    try { data = await r.json(); } catch (e) { /* empty body */ }
+    return { status: r.status, data: data };
+  }
+  function errMsg(r, fallback) { return (r && r.data && r.data.error && r.data.error.message) || fallback; }
+  function gateStatus(msg, isErr) { var s = $('gateStatus'); s.textContent = msg || ''; s.classList.toggle('err', !!isErr); }
+
+  function showApp() {
+    $('gate').classList.add('hide');
+    $('app').classList.remove('hide');
+    $('accessLine').classList.remove('hide');
+    $('accessKind').textContent = access.kind === 'pass' ? 'Access: password' : 'Access: purchased';
+    if (!appStarted) { appStarted = true; startApp(); }
+  }
+  function showGate(msg) {
+    $('app').classList.add('hide');
+    $('accessLine').classList.add('hide');
+    $('gate').classList.remove('hide');
+    gateStatus(msg || '', !!msg);
+    loadConfig();
+  }
+  function grant(token, kind) { access.token = token; access.kind = kind; store(TOKEN_STORE, token); showApp(); }
+  function revoke(msg) { access.token = null; access.kind = null; store(TOKEN_STORE, null); showGate(msg); window.scrollTo(0, 0); }
+
+  async function loadConfig() {
+    try {
+      var r = await api('/access/config');
+      var c = r.data || {};
+      access.paymentUrl = c.paymentUrl || null;
+      if (c.price) $('gatePrice').textContent = c.price;
+      if (c.deepReadsPerDay) $('gateDaily').textContent = c.deepReadsPerDay;
+      var buy = $('buyBtn');
+      if (access.paymentUrl) { buy.href = access.paymentUrl; buy.removeAttribute('aria-disabled'); buy.textContent = 'Get access · ' + (c.price || '$39'); }
+    } catch (e) {
+      gateStatus('Could not reach the Undertow server. Check your connection and reload.', true);
+    }
+  }
+
+  async function redeemSession(id) {
+    store(PENDING_STORE, id);
+    gateStatus('Confirming your payment…');
+    for (var i = 0; i < 30; i++) {
+      try {
+        var r = await api('/access/redeem', { body: { session_id: id } });
+        if (r.status === 200 && r.data && r.data.token) { store(PENDING_STORE, null); grant(r.data.token, 'paid'); return; }
+        if (r.status !== 202 && r.status !== 429 && r.status < 500) {
+          store(PENDING_STORE, null);
+          gateStatus(errMsg(r, 'This payment could not be confirmed.'), true);
+          return;
+        }
+      } catch (e) { /* network blip: keep trying */ }
+      await new Promise(function (res) { setTimeout(res, 3000); });
+    }
+    gateStatus('Your payment is still being confirmed, which usually takes under a minute. Reload this page shortly and access will open.', true);
+  }
+
+  function wireAccess() {
+    var dlg = $('passDialog');
+    $('buyBtn').addEventListener('click', function (ev) {
+      if (!access.paymentUrl) { ev.preventDefault(); gateStatus('Checkout isn\'t open yet. Please check back soon.', true); }
+    });
+    $('passBtn').addEventListener('click', function () {
+      $('passStatus').textContent = '';
+      $('passStatus').classList.remove('err');
+      $('passInput').value = '';
+      if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+      $('passInput').focus();
+    });
+    $('passCancel').addEventListener('click', function () { dlg.close(); });
+    $('passForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var pw = $('passInput').value;
+      if (!pw) return;
+      var st = $('passStatus');
+      st.classList.remove('err');
+      st.textContent = 'Checking…';
+      $('passSubmit').disabled = true;
+      try {
+        var r = await api('/access/password', { body: { password: pw } });
+        if (r.status === 200 && r.data && r.data.token) { dlg.close(); grant(r.data.token, 'pass'); }
+        else { st.classList.add('err'); st.textContent = errMsg(r, 'That didn\'t work. Try again.'); $('passInput').select(); }
+      } catch (e) {
+        st.classList.add('err');
+        st.textContent = 'Could not reach the Undertow server.';
+      } finally {
+        $('passSubmit').disabled = false;
+      }
+    });
+    $('signOut').addEventListener('click', function () { revoke(); });
+  }
+
+  function initAccess() {
+    wireAccess();
+    var q = /[?&]session_id=([^&#]+)/.exec(location.search);
+    if (q) history.replaceState(null, '', location.pathname + location.hash);
+    var saved = load(TOKEN_STORE);
+    var p = saved && tokenPayload(saved);
+    if (p && p.exp * 1000 > Date.now()) {
+      access.token = saved;
+      access.kind = p.k;
+      showApp();
+      // Confirm in the background; relock if the server no longer accepts it (refund, password change).
+      api('/access/check', { headers: { 'x-undertow-token': saved } })
+        .then(function (r) { if (r.status === 401) revoke('Access in this browser has ended. You can unlock it again below.'); })
+        .catch(function () { /* offline: the scan still works */ });
+      return;
+    }
+    if (saved) store(TOKEN_STORE, null);
+    showGate();
+    var pending = q ? decodeURIComponent(q[1]) : load(PENDING_STORE);
+    if (pending) redeemSession(pending);
+  }
+
   // ---------- Init ----------
+  function startApp() {
+    // index.html#sample=Recruitment%20pitch (or #sample=body) opens straight into a specimen
+    var m = /[#&]sample=([^&]+)/.exec(location.hash);
+    if (m) {
+      var name = decodeURIComponent(m[1]);
+      if (name === 'body') { state.files = BODY_OF_WORK.slice(); renderChips(); runScan(); }
+      else if (SAMPLES[name]) { $('paste').value = SAMPLES[name]; runScan(); }
+    }
+  }
+
   $('modelName').textContent = D.MODEL;
   $('epistemic').textContent = E.EPISTEMIC_NOTE;
   try { var saved = localStorage.getItem(KEY_STORE); if (saved) { $('apiKey').value = saved; $('rememberKey').checked = true; } } catch (e) { /* storage unavailable */ }
@@ -862,14 +1065,7 @@
   buildSamples();
   wireInput();
   wireExport();
-
-  // index.html#sample=Recruitment%20pitch (or #sample=body) opens straight into a specimen
-  var m = /[#&]sample=([^&]+)/.exec(location.hash);
-  if (m) {
-    var name = decodeURIComponent(m[1]);
-    if (name === 'body') { state.files = BODY_OF_WORK.slice(); renderChips(); runScan(); }
-    else if (SAMPLES[name]) { $('paste').value = SAMPLES[name]; runScan(); }
-  }
+  initAccess();
 })();
 </script>
 </body>
