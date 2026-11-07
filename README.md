@@ -30,31 +30,49 @@ ANTHROPIC_API_KEY=sk-ant-... node cli.js ./posts --deep
 
 The CLI also accepts an `ant auth login` profile.
 
-In the browser, the deep read works without a key: it runs through the hosted proxy (`worker/`), within a daily allowance. To use your own key instead, open **Deep read → Use your own API key**. That key goes only from your browser to api.anthropic.com.
+In the browser, the deep read is included with access. It runs through the hosted proxy (`worker/`), within a daily limit. To use your own key instead, open **Deep read → Use your own API key**. That key goes only from your browser to api.anthropic.com.
 
-**Tests:** `npm test`. This runs the engine tests, the deep-read wiring test against a local mock API, and the proxy's rule tests. None of them call anything external or cost anything. `node test/hosted-smoke.mjs` checks the deployed proxy; adding `--live` spends one hosted deep read.
+**Tests:** `npm test`. This runs the engine tests, the deep-read wiring test against a local mock API, and the Worker's tests (access, Stripe webhook, restore by email, limits). None of them call anything external or cost anything. `node test/hosted-smoke.mjs` checks the deployed Worker.
 
-## Hosted proxy
+## Access and the hosted Worker
 
-`worker/` is a Cloudflare Worker that holds the Anthropic API key so visitors can run a deep read without one. It is not a general Claude proxy. It accepts only a single text user message, and it rebuilds the model, system prompt, output schema, thinking and token limit from `deep.js`. A client can't change any of these or add tools.
+The page opens on a paywall: **$39, one time**, the same price as the Word Autopsy but a separate Stripe product. `worker/` is a Cloudflare Worker that handles access and the hosted deep read.
 
-Limits are set in `worker/wrangler.toml`:
+**Ways in.** Each one ends with a signed access token kept in the browser:
+- **Payment.** Stripe Payment Link → back to the page with `?session_id=` → the Worker confirms it via the webhook → token.
+- **Password.** "Enter password" → the Worker compares it with `UNDERTOW_PASSWORD` → token. Changing the password signs out password sessions.
+- **Restore by email.** "Restore access by email" → if the address matches a purchase, the Worker emails a sign-in link that works once and expires in 30 minutes. Every request gets the same answer, so the form can't be used to look up who bought. Buyer emails are kept only as salted hashes.
+- **Refunds.** A refund ends paid access through the `charge.refunded` webhook.
+
+**The deep read** requires a token. It is not a general Claude proxy: it accepts only a single text user message, and it rebuilds the model, system prompt, output schema, thinking and token limit from `deep.js`.
+
+**Limits** are set in `worker/wrangler.toml`:
 
 | Limit | Default |
 |---|---|
 | Allowed page origins | sugarcypher.github.io, localhost:8000 |
-| Burst | 2 requests a minute per IP |
-| Per visitor | 5 deep reads a day per IP |
-| Global | 25 deep reads a day |
+| Deep reads per purchase | 10 a day |
+| Deep reads on the password | 25 a day |
+| Deep reads, everyone | 60 a day |
+| Burst | 2 deep reads a minute per IP |
+| Password attempts | 5 a minute per IP |
+| Restore emails | 3 requests a minute per IP, 5 emails a day per address |
 | Body size | 400,000 characters |
 
-The daily counts are approximate because KV storage is eventually consistent. Set a monthly spend limit in the Anthropic Console as the hard backstop.
+Daily counts are approximate because KV storage is eventually consistent. Set a monthly spend limit in the Anthropic Console as the hard backstop.
+
+**Setup.** Each `secret put` asks for the value at the prompt:
 
 ```bash
-cd worker
-wrangler secret put ANTHROPIC_API_KEY   # paste the key at the prompt
-wrangler deploy                          # after changing limits or deep.js
+wrangler secret put ANTHROPIC_API_KEY  --name errorfect-undertow-api
+wrangler secret put UNDERTOW_PASSWORD  --name errorfect-undertow-api
+bash worker/setup-stripe.sh            # Stripe product, $39 price, payment link, webhook
+wrangler secret put RESEND_API_KEY     --name errorfect-undertow-api   # restore by email
+wrangler secret put EMAIL_FROM         --name errorfect-undertow-api   # e.g. Errorfect <access@errorfect.com>
+cd worker && wrangler deploy           # after changing limits or deep.js
 ```
+
+The Worker also has a `TOKEN_SECRET`, which signs the tokens. Replacing it signs everyone out.
 
 ## How a scan works
 

@@ -269,9 +269,23 @@
       <button class="btn" type="button" id="passBtn">Enter password</button>
     </div>
     <div class="status" id="gateStatus" role="status" aria-live="polite"></div>
-    <p class="fine">Checkout is handled by Stripe. After paying you return to this page, and access is saved in this browser.</p>
+    <p class="fine">Checkout is handled by Stripe. After paying you return to this page, and access is saved in this browser.<span id="restoreLine" class="hide"> Bought it already, or using another device? <button type="button" class="linkbtn" id="restoreBtn">Restore access by email</button>.</span></p>
   </div>
 </section>
+
+<dialog class="pass" id="restoreDialog" aria-labelledby="restoreTitle">
+  <form method="dialog" id="restoreForm">
+    <h2 id="restoreTitle">Restore access</h2>
+    <p class="hint" style="margin-top:8px">Enter the email address you used at checkout. If it matches a purchase, we'll send a sign-in link that works once and expires in 30 minutes.</p>
+    <label for="restoreEmail">Email</label>
+    <input type="text" inputmode="email" id="restoreEmail" autocomplete="email" required />
+    <div class="status" id="restoreStatus" role="status" aria-live="polite"></div>
+    <div class="row">
+      <button class="btn" type="button" id="restoreCancel">Close</button>
+      <button class="btn primary" type="submit" id="restoreSubmit">Send link</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog class="pass" id="passDialog" aria-labelledby="passTitle">
   <form method="dialog" id="passForm">
@@ -967,6 +981,7 @@
       if (c.deepReadsPerDay) $('gateDaily').textContent = c.deepReadsPerDay;
       var buy = $('buyBtn');
       if (access.paymentUrl) { buy.href = access.paymentUrl; buy.removeAttribute('aria-disabled'); buy.textContent = 'Get access · ' + (c.price || '$39'); }
+      $('restoreLine').classList.toggle('hide', !c.restoreEnabled);
     } catch (e) {
       gateStatus('Could not reach the Undertow server. Check your connection and reload.', true);
     }
@@ -1023,12 +1038,58 @@
       }
     });
     $('signOut').addEventListener('click', function () { revoke(); });
+
+    var rdlg = $('restoreDialog');
+    $('restoreBtn').addEventListener('click', function () {
+      $('restoreStatus').textContent = '';
+      $('restoreStatus').classList.remove('err');
+      $('restoreSubmit').disabled = false;
+      if (rdlg.showModal) rdlg.showModal(); else rdlg.setAttribute('open', '');
+      $('restoreEmail').focus();
+    });
+    $('restoreCancel').addEventListener('click', function () { rdlg.close(); });
+    $('restoreForm').addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var email = $('restoreEmail').value.trim();
+      if (!email) return;
+      var st = $('restoreStatus');
+      st.classList.remove('err');
+      st.textContent = 'Sending…';
+      $('restoreSubmit').disabled = true;
+      try {
+        var r = await api('/access/restore', { body: { email: email } });
+        if (r.status === 200) { st.textContent = r.data.message; return; } // leave Send disabled: one request is enough
+        st.classList.add('err');
+        st.textContent = errMsg(r, 'That didn\'t work. Try again.');
+      } catch (e) {
+        st.classList.add('err');
+        st.textContent = 'Could not reach the Undertow server.';
+      }
+      $('restoreSubmit').disabled = false;
+    });
+  }
+
+  async function redeemRestore(code) {
+    gateStatus('Signing you in…');
+    var tries = 8;
+    for (var i = 0; i < tries; i++) {
+      try {
+        var r = await api('/access/restore/redeem', { body: { code: code } });
+        if (r.status === 200 && r.data && r.data.token) { grant(r.data.token, 'paid'); return; }
+        // A fresh link can take a few seconds to reach every Cloudflare location, so retry "not found" briefly.
+        if (r.status !== 404 && r.status !== 429 && r.status < 500) { gateStatus(errMsg(r, 'That sign-in link didn\'t work.'), true); return; }
+        if (i === tries - 1) { gateStatus(errMsg(r, 'That sign-in link didn\'t work.'), true); return; }
+      } catch (e) { /* network blip: retry */ }
+      await new Promise(function (res) { setTimeout(res, 3000); });
+    }
   }
 
   function initAccess() {
     wireAccess();
     var q = /[?&]session_id=([^&#]+)/.exec(location.search);
-    if (q) history.replaceState(null, '', location.pathname + location.hash);
+    var rq = /[?&]restore=([A-Za-z0-9_-]+)/.exec(location.search);
+    if (q || rq) history.replaceState(null, '', location.pathname + location.hash);
+    if (rq) { showGate(); redeemRestore(rq[1]); return; }
     var saved = load(TOKEN_STORE);
     var p = saved && tokenPayload(saved);
     if (p && p.exp * 1000 > Date.now()) {

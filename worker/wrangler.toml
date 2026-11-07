@@ -12,6 +12,8 @@ PAID_DAILY = "10"       # hosted deep reads per day for each paid access
 PASS_DAILY = "25"       # hosted deep reads per day on the password
 DAILY_LIMIT = "60"      # hosted deep reads per day, everyone combined
 MAX_BODY_CHARS = "400000"
+SITE_URL = "https://sugarcypher.github.io/errorfect-undertow/"
+RESTORE_PER_EMAIL_DAILY = "5"   # sign-in emails per address per day
 
 [[ratelimits]]
 name = "PER_IP"         # deep-read bursts
@@ -22,6 +24,11 @@ simple = { limit = 2, period = 60 }
 name = "PASS_IP"        # password attempts
 namespace_id = "7302"
 simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "RESTORE_IP"     # restore-by-email requests
+namespace_id = "7304"
+simple = { limit = 3, period = 60 }
 
 [[ratelimits]]
 name = "ACCESS_IP"      # payment confirmation polling

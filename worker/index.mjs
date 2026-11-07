@@ -14,6 +14,8 @@
  *   POST /access/redeem          {session_id} → token, once Stripe confirms the payment
  *   POST /access/password        {password}   → token
  *   GET  /access/check           x-undertow-token → is the token still valid
+ *   POST /access/restore         {email} → emails a one-time sign-in link to a past buyer
+ *   POST /access/restore/redeem  {code}  → token, from that link
  *   POST /stripe/webhook         Stripe events (signature-verified)
  *   POST /v1/messages            hosted deep read (x-undertow-token required)
  *
@@ -26,6 +28,10 @@
  *   STRIPE_PAYMENT_URL      https://buy.stripe.com/… shown on the paywall
  *   STRIPE_SECRET_KEY       optional restricted key (Checkout Sessions: read) — confirms a
  *                           payment directly if the webhook hasn't arrived yet
+ *   RESEND_API_KEY          re_… — sends restore-by-email links (resend.com)
+ *   EMAIL_FROM              e.g. "Errorfect <access@errorfect.com>", on a domain verified in Resend
+ *
+ * Buyer emails are never stored in plain text: KV keeps a salted hash → checkout session ids.
  */
 import Deep from '../deep.js';
 
@@ -34,6 +40,8 @@ const BETA = 'server-side-fallback-2026-07-01';
 const DEFAULT_VERSION = '2023-06-01';
 const PAID_TTL = 60 * 60 * 24 * 365 * 5; // one-time purchase: five years on this browser
 const PASS_TTL = 60 * 60 * 24 * 365;
+const RESTORE_TTL = 30 * 60; // sign-in links expire after 30 minutes
+const DEFAULT_SITE = 'https://sugarcypher.github.io/errorfect-undertow/';
 const enc = new TextEncoder();
 
 // ---------- small helpers ----------
@@ -124,9 +132,21 @@ function countsAsPaid(env, session) {
   return !!(session && env.STRIPE_PAYMENT_LINK_ID && session.payment_link === env.STRIPE_PAYMENT_LINK_ID && session.payment_status === 'paid');
 }
 
+const normEmail = (e) => String(e || '').trim().toLowerCase();
+async function emailKey(email) { return 'email:' + (await sha256hex('undertow-email:' + normEmail(email))); }
+
 async function recordPaid(env, session) {
   await env.USAGE.put('paid:' + session.id, String(now()));
   if (session.payment_intent) await env.USAGE.put('pi:' + session.payment_intent, session.id);
+  const email = (session.customer_details && session.customer_details.email) || session.customer_email;
+  if (email) {
+    const key = await emailKey(email);
+    const list = JSON.parse((await env.USAGE.get(key)) || '[]');
+    if (!list.includes(session.id)) {
+      list.push(session.id);
+      await env.USAGE.put(key, JSON.stringify(list));
+    }
+  }
 }
 
 async function confirmWithStripe(env, sessionId) {
@@ -185,6 +205,76 @@ async function password(req, env, cors) {
   if (!ok) return apiError(401, 'authentication_error', 'That password didn\'t match.', cors);
   const iat = now();
   return json(200, { token: await signToken(env, { k: 'pass', s: 'pass', pv: await passVersion(env), iat, exp: iat + PASS_TTL }), kind: 'pass' }, cors);
+}
+
+function restoreEnabled(env) { return !!(env.RESEND_API_KEY && env.EMAIL_FROM); }
+
+async function sendRestoreEmail(env, to, link) {
+  const text = [
+    'Here is your link to open Errorfect Undertow in a browser:',
+    '',
+    link,
+    '',
+    'It works once and expires in 30 minutes. If you didn\'t ask for it, you can ignore this email; nothing about your access changes.',
+    '',
+    'Errorfect · ThinkWell Labs'
+  ].join('\n');
+  const html = '<div style="font-family:Courier New,monospace;font-size:15px;line-height:1.6;color:#1a1a2e">' +
+    '<p>Here is your link to open Errorfect Undertow in a browser:</p>' +
+    '<p><a href="' + link + '" style="display:inline-block;padding:10px 18px;background:#00a8b5;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold">Open Undertow</a></p>' +
+    '<p style="color:#555">It works once and expires in 30 minutes. If you didn\'t ask for it, you can ignore this email; nothing about your access changes.</p>' +
+    '<p style="color:#888">Errorfect · ThinkWell Labs</p></div>';
+  const r = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + env.RESEND_API_KEY },
+    body: JSON.stringify({ from: env.EMAIL_FROM, to: [to], subject: 'Your Undertow sign-in link', text, html })
+  });
+  if (!r.ok) console.log('restore email failed', r.status, await r.text());
+}
+
+// Same answer whether or not the address bought anything, so the endpoint can't be used to look up buyers.
+async function restoreRequest(req, env, ctx, cors) {
+  if (!restoreEnabled(env)) return apiError(503, 'api_error', 'Restoring by email isn\'t set up yet.', cors);
+  const ip = req.headers.get('CF-Connecting-IP') || 'unknown';
+  if (await limited(env.RESTORE_IP, 'restore:' + ip)) return apiError(429, 'rate_limit_error', 'Too many requests. Wait a minute and try again.', cors);
+  const body = await readJson(req, 2000);
+  const email = normEmail(body && body.email);
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return apiError(400, 'invalid_request_error', 'Enter the email address you used at checkout.', cors);
+  }
+  const done = json(200, { ok: true, message: 'If that address was used to buy Undertow, a sign-in link is on its way. It expires in 30 minutes.' }, cors);
+
+  const key = await emailKey(email);
+  const sent = await bump(env.USAGE, 'restore-sent:' + key + ':' + today(), int(env.RESTORE_PER_EMAIL_DAILY, 5));
+  if (!sent.ok) return done; // don't flood a buyer's inbox
+  ctx.waitUntil(sent.write);
+
+  const list = JSON.parse((await env.USAGE.get(key)) || '[]');
+  let sid = null;
+  for (let i = list.length - 1; i >= 0 && !sid; i--) {
+    if (!(await env.USAGE.get('revoked:' + list[i]))) sid = list[i];
+  }
+  if (!sid) return done;
+
+  const code = b64u(crypto.getRandomValues(new Uint8Array(24)));
+  await env.USAGE.put('restore:' + code, sid, { expirationTtl: RESTORE_TTL });
+  const link = (env.SITE_URL || DEFAULT_SITE) + '?restore=' + code;
+  ctx.waitUntil(sendRestoreEmail(env, email, link));
+  return done;
+}
+
+async function restoreRedeem(req, env, cors) {
+  const ip = req.headers.get('CF-Connecting-IP') || 'unknown';
+  if (await limited(env.ACCESS_IP, 'restore-redeem:' + ip)) return apiError(429, 'rate_limit_error', 'Too many attempts. Wait a minute and try again.', cors);
+  const body = await readJson(req, 2000);
+  const code = body && body.code;
+  if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{20,64}$/.test(code)) return apiError(400, 'invalid_request_error', 'That sign-in link is not valid.', cors);
+  const sid = await env.USAGE.get('restore:' + code);
+  if (!sid) return apiError(404, 'not_found_error', 'This sign-in link has expired or was already used. You can request a new one.', cors);
+  await env.USAGE.delete('restore:' + code); // one use only
+  if (await env.USAGE.get('revoked:' + sid)) return apiError(403, 'permission_error', 'This purchase was refunded, so access has ended.', cors);
+  const iat = now();
+  return json(200, { token: await signToken(env, { k: 'paid', s: sid, iat, exp: iat + PAID_TTL }), kind: 'paid' }, cors);
 }
 
 async function deepRead(req, env, ctx, cors) {
@@ -275,7 +365,8 @@ export default {
         keyConfigured: !!env.ANTHROPIC_API_KEY,
         tokensConfigured: !!env.TOKEN_SECRET,
         passwordConfigured: !!env.UNDERTOW_PASSWORD,
-        stripeConfigured: !!(env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PAYMENT_LINK_ID && env.STRIPE_PAYMENT_URL)
+        stripeConfigured: !!(env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PAYMENT_LINK_ID && env.STRIPE_PAYMENT_URL),
+        emailConfigured: restoreEnabled(env)
       }, cors);
     }
 
@@ -287,9 +378,12 @@ export default {
         paymentUrl: env.STRIPE_PAYMENT_URL || null,
         price: env.PRICE_LABEL || '$39',
         passwordEnabled: !!env.UNDERTOW_PASSWORD,
+        restoreEnabled: restoreEnabled(env),
         deepReadsPerDay: int(env.PAID_DAILY, 10)
       }, cors);
     }
+    if (req.method === 'POST' && url.pathname === '/access/restore') return restoreRequest(req, env, ctx, cors);
+    if (req.method === 'POST' && url.pathname === '/access/restore/redeem') return restoreRedeem(req, env, cors);
     if (req.method === 'POST' && url.pathname === '/access/redeem') return redeem(req, env, cors);
     if (req.method === 'POST' && url.pathname === '/access/password') return password(req, env, cors);
     if (req.method === 'GET' && url.pathname === '/access/check') {

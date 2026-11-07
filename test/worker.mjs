@@ -15,7 +15,7 @@ globalThis.fetch = async (url, init) => {
 
 function kv() {
   const m = new Map();
-  return { m, get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); } };
+  return { m, get: async (k) => m.get(k) ?? null, put: async (k, v) => { m.set(k, v); }, delete: async (k) => { m.delete(k); } };
 }
 const ok = { limit: async () => ({ success: true }) };
 function env(over) {
@@ -23,10 +23,13 @@ function env(over) {
     ANTHROPIC_API_KEY: 'sk-test', TOKEN_SECRET: 'tok-secret', UNDERTOW_PASSWORD: 'open sesame',
     STRIPE_WEBHOOK_SECRET: WHSEC, STRIPE_PAYMENT_LINK_ID: LINK, STRIPE_PAYMENT_URL: 'https://buy.stripe.com/x',
     ALLOWED_ORIGINS: ORIGIN, DAILY_LIMIT: '4', PAID_DAILY: '2', PASS_DAILY: '3', MAX_BODY_CHARS: '5000',
-    USAGE: kv(), PER_IP: ok, PASS_IP: ok, ACCESS_IP: ok, ...over
+    RESEND_API_KEY: 're_test', EMAIL_FROM: 'Errorfect <access@errorfect.com>', SITE_URL: 'https://site.example/undertow/',
+    USAGE: kv(), PER_IP: ok, PASS_IP: ok, ACCESS_IP: ok, RESTORE_IP: ok, ...over
   };
 }
-const ctx = { waitUntil: (p) => p };
+const pending = [];
+const ctx = { waitUntil: (p) => { pending.push(p); } };
+async function flush() { await Promise.all(pending.splice(0)); }
 const W = 'https://w.example';
 function req(path, { method = 'POST', body, headers = {} } = {}) {
   return new Request(W + path, {
@@ -45,7 +48,11 @@ function webhook(e, event, secret = WHSEC) {
   return worker.fetch(new Request(W + '/stripe/webhook', { method: 'POST', headers: { 'Stripe-Signature': 't=' + t + ',v1=' + sig }, body: payload }), e, ctx);
 }
 const SESSION = 'cs_live_a1B2c3D4e5F6g7H8i9';
-const completed = (over) => ({ type: 'checkout.session.completed', created: 1, data: { object: { id: SESSION, payment_link: LINK, payment_status: 'paid', payment_intent: 'pi_1', ...over } } });
+const BUYER = 'Buyer@Example.com';
+const completed = (over) => ({ type: 'checkout.session.completed', created: 1, data: { object: { id: SESSION, payment_link: LINK, payment_status: 'paid', payment_intent: 'pi_1', customer_details: { email: BUYER }, ...over } } });
+const restore = (e, email) => worker.fetch(req('/access/restore', { body: { email } }), e, ctx);
+const redeemCode = (e, code) => worker.fetch(req('/access/restore/redeem', { body: { code } }), e, ctx);
+const emails = () => upstreamCalls.filter((c) => c.url === 'https://api.resend.com/emails').map((c) => JSON.parse(c.init.body));
 
 let passed = 0;
 async function t(name, fn) { upstreamCalls = []; await fn(); passed++; console.log('ok  ' + name); }
@@ -201,6 +208,66 @@ await t('per-access and global daily caps', async () => {
   const capped = await deep(e, pass);
   assert.equal(capped.status, 429);
   assert.match((await capped.json()).error.message, /limit for today/);
+});
+
+await t('buyer email is stored only as a hash', async () => {
+  const e = env();
+  await webhook(e, completed());
+  const dump = JSON.stringify([...e.USAGE.m.entries()]);
+  assert.equal(dump.toLowerCase().includes('buyer@example.com'), false);
+  assert.ok([...e.USAGE.m.keys()].some((k) => k.startsWith('email:')));
+});
+
+await t('restore: buyer gets a one-time link that signs them in', async () => {
+  const e = env();
+  await webhook(e, completed());
+  const r = await restore(e, '  buyer@EXAMPLE.com ');
+  assert.equal(r.status, 200);
+  await flush();
+  const sent = emails();
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].to, ['buyer@example.com']);
+  assert.equal(sent[0].from, 'Errorfect <access@errorfect.com>');
+  const code = /\?restore=([A-Za-z0-9_-]+)/.exec(sent[0].text)[1];
+  assert.ok(sent[0].text.startsWith('Here is your link'));
+  const ok = await redeemCode(e, code);
+  assert.equal(ok.status, 200);
+  const { token, kind } = await ok.json();
+  assert.equal(kind, 'paid');
+  assert.equal((await deep(e, token)).status, 200);
+  assert.equal((await redeemCode(e, code)).status, 404); // one use only
+});
+
+await t('restore: same answer for strangers, and no email sent', async () => {
+  const e = env();
+  await webhook(e, completed());
+  const buyer = await (await restore(e, BUYER)).json();
+  await flush();
+  upstreamCalls = [];
+  const stranger = await (await restore(e, 'someone@else.com')).json();
+  await flush();
+  assert.deepEqual(stranger, buyer);
+  assert.equal(emails().length, 0);
+});
+
+await t('restore: refunded purchases get no link; bad input and limits handled', async () => {
+  const e = env();
+  await webhook(e, completed());
+  await webhook(e, { type: 'charge.refunded', created: 2, data: { object: { refunded: true, payment_intent: 'pi_1' } } });
+  await restore(e, BUYER);
+  await flush();
+  assert.equal(emails().length, 0);
+  assert.equal((await restore(e, 'not-an-email')).status, 400);
+  assert.equal((await redeemCode(e, 'short')).status, 400);
+  assert.equal((await restore(env({ RESTORE_IP: { limit: async () => ({ success: false }) } }), BUYER)).status, 429);
+  assert.equal((await restore(env({ RESEND_API_KEY: undefined }), BUYER)).status, 503);
+});
+
+await t('restore: at most RESTORE_PER_EMAIL_DAILY emails per address', async () => {
+  const e = env({ RESTORE_PER_EMAIL_DAILY: '2' });
+  await webhook(e, completed());
+  for (let i = 0; i < 4; i++) { assert.equal((await restore(e, BUYER)).status, 200); await flush(); }
+  assert.equal(emails().length, 2);
 });
 
 await t('missing API key gives 503; health reports configuration without secrets', async () => {
